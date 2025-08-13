@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body { height: 100%; }
+:root { 
+  color-scheme: light; 
+  /* Tailwind拡張のvarに合わせる */
+  --background: #ffffff;
+  --foreground: #111111;
+}
+body { background: var(--background); color: var(--foreground); }
+
+/* 番号表示制御用クラス */
+ol.no-numbers { list-style: none; padding-left: 0; margin: 0; }
+
+/* 任意: スクロールの見た目を少し良くする（対応ブラウザのみ） */
+* { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+::-webkit-scrollbar { height: 8px; width: 8px; }
+::-webkit-scrollbar-thumb { border-radius: 8px; background: #cbd5e1; }
