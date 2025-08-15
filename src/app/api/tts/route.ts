@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
         "Content-Disposition": `inline; filename="${filename}"`,
       },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     // タイムアウト or Abort
     if (err?.name === "AbortError") {
       return new Response(
@@ -132,8 +132,8 @@ export async function POST(req: NextRequest) {
 
     // OpenAI APIエラーかもしれないので簡易整形
     const message =
-      err?.response?.data?.error?.message ??
-      err?.message ??
+      (err as any)?.response?.data?.error?.message ??
+      (err as any)?.message ??
       "TTS Error";
     console.error("[/api/tts] error", message);
 

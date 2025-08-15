@@ -127,7 +127,7 @@ export default function ModelPage() {
   }, [base]);
 
   // ② TTS用台本（要約あり）→ セグメント化（uiIndexでUI行と同期）
-  const { ttsSegments, uiLineCount } = useMemo(() => {
+  const ttsSegments = useMemo(() => {
     const intro = `ナレーター: ではお手本の会話です。`;
     const core = (base.modelScript && base.modelScript.trim() !== "" ? base.modelScript : base.script).trim();
     const summary = buildNarratorSummary(modelPoints);
@@ -154,7 +154,7 @@ export default function ModelPage() {
       })
       .filter((x): x is Seg => !!x);
 
-    return { ttsSegments, uiLineCount };
+    return ttsSegments;
   }, [base, modelPoints]);
 
   // ③ 再生の状態
@@ -166,10 +166,14 @@ export default function ModelPage() {
   const [segmentStartsSec, setSegmentStartsSec] = useState<number[]>([]);
   const [mergedUiIndexes, setMergedUiIndexes] = useState<number[]>([]);
   const [hasFinished, setHasFinished] = useState(false);
+  const [isReadingSummary, setIsReadingSummary] = useState(false);
+  const [hasScrolledToLearningPoints, setHasScrolledToLearningPoints] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const quizRef = useRef<HTMLDivElement>(null);
+  const learningPointsRef = useRef<HTMLDivElement>(null);
   const [audioURL, setAudioURL] = useState<string | null>(null);
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
 
   // UIでの「最初のダイアログ行」（ナレーターで始まる場合の戻り先）
   const firstDialogIndex = useMemo(() => {
@@ -190,20 +194,21 @@ export default function ModelPage() {
     let aborted = false; let createdUrl: string | null = null;
     (async () => {
       try {
-        if (!ttsSegments.length) { setAudioURL(null); setSegmentStartsSec([]); setMergedUiIndexes([]); return; }
+        setIsGeneratingAudio(true);
+        if (!ttsSegments.length) { setAudioURL(null); setSegmentStartsSec([]); setMergedUiIndexes([]); setIsGeneratingAudio(false); return; }
 
         // 1) 同一話者結合（API回数削減）— uiIndex を維持
         const mergedSegs = coalesceSegments(ttsSegments);
         setMergedUiIndexes(mergedSegs.map(s => s.uiIndex));
 
         // 2) AudioContext（24kHz優先、失敗時フォールバック）
-        const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+        const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
         const targetSR = 24000;
         let ctx: AudioContext;
         try { ctx = new AC({ sampleRate: targetSR }); } catch { ctx = new AC(); }
 
-        // 3) 並列でフェッチ＆デコード（各セグメント失敗時は無音1秒）
-        const decoded = await asyncPool(3, mergedSegs, async (seg) => {
+        // 3) 並列でフェッチ＆デコード（並列数を5に増加で高速化）
+        const decoded = await asyncPool(5, mergedSegs, async (seg) => {
           const voice = voiceOf(seg.speaker || "");
           return await fetchDecodeSegment(ctx, seg.text, voice, "mp3");
         });
@@ -244,11 +249,13 @@ export default function ModelPage() {
         setDuration(rendered.duration);
         setCurrentTime(0);
         setCurrentIdx(firstDialogIndex); // 最初のダイアログ行をハイライト
+        setIsGeneratingAudio(false);
       } catch (e) {
         console.error("model build merged audio failed:", e);
         setAudioURL(null);
         setSegmentStartsSec([]);
         setMergedUiIndexes([]);
+        setIsGeneratingAudio(false);
       }
     })();
     return () => { aborted = true; if (createdUrl) URL.revokeObjectURL(createdUrl); };
@@ -286,7 +293,7 @@ export default function ModelPage() {
 
   // ⑥ 現在時間 → ハイライト行（二分探索 + uiIndex でUIに同期）
   useEffect(() => {
-    if (!segmentStartsSec.length) return;
+    if (!segmentStartsSec.length || !ttsSegments.length) return;
     let lo = 0, hi = segmentStartsSec.length - 1, idx = 0;
     const t = currentTime + 1e-3;
     while (lo <= hi) {
@@ -295,12 +302,45 @@ export default function ModelPage() {
       else hi = mid - 1;
     }
     setCurrentIdx(mergedUiIndexes[idx] ?? firstDialogIndex);
-  }, [currentTime, segmentStartsSec, mergedUiIndexes, firstDialogIndex]);
+    
+    // ナレーターの学習ポイントまとめ開始を検知してスクロール（一度だけ実行）
+    const currentSegment = ttsSegments[idx];
+    if (currentSegment && 
+        currentSegment.speaker === "ナレーター" && 
+        currentSegment.text.includes("本日のポイントは三つです") &&
+        !hasScrolledToLearningPoints) {
+      
+      console.log('📚 Learning points summary started, scrolling to learning points section (one-time)');
+      
+      if (learningPointsRef.current) {
+        const elementRect = learningPointsRef.current.getBoundingClientRect();
+        const viewportHeight = window.innerHeight;
+        const scrollY = window.scrollY;
+        
+        // 学習ポイントセクションが画面の上から20%の位置に来るようにスクロール
+        const targetY = scrollY + elementRect.top - (viewportHeight * 0.2);
+        
+        window.scrollTo({
+          top: Math.max(0, targetY),
+          behavior: 'smooth'
+        });
+        
+        // フラグを設定して、再度自動スクロールしないようにする
+        setHasScrolledToLearningPoints(true);
+      }
+      
+      setIsReadingSummary(true);
+    } else if (currentSegment && currentSegment.speaker !== "ナレーター") {
+      setIsReadingSummary(false);
+    }
+  }, [currentTime, segmentStartsSec, mergedUiIndexes, firstDialogIndex, ttsSegments, learningPointsRef, hasScrolledToLearningPoints]);
 
-  // ⑦ 音声終了後にクイズへスムーススクロール
+  // ⑦ 音声終了後の処理（スクロールは⑥で実行済みなので、ここでは状態管理のみ）
   useEffect(() => {
-    if (hasFinished && quizRef.current) {
-      quizRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (hasFinished) {
+      console.log('🎓 Model page: Audio completely finished');
+      setIsReadingSummary(false); // 音声終了時にインジケーターを非表示
+      setHasScrolledToLearningPoints(false); // 次回再生のためにフラグをリセット
     }
   }, [hasFinished]);
 
@@ -318,24 +358,52 @@ export default function ModelPage() {
     setCurrentTime(0);
     setCurrentIdx(firstDialogIndex);
     setHasFinished(false);
+    setIsReadingSummary(false);
+    setHasScrolledToLearningPoints(false); // 停止時にフラグをリセット
   };
 
   /* ========= JSX ========= */
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-6">
+    <main className="min-h-screen bg-slate-50">
+      <div className="max-w-6xl mx-auto px-6 py-8 space-y-8">
       {/* 常時マウント */}
       <audio ref={audioRef} src={audioURL ?? undefined} preload="auto" hidden />
 
-      {/* 見出し */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">{sampleScene.title}（お手本）</h1>
-        <Link href="/" className="text-sm text-indigo-600 hover:underline">← もどる</Link>
-      </div>
+        {/* ビジネス向けヘッダー */}
+        <header className="bg-white border border-slate-200 rounded-lg shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <Link 
+              href="/" 
+              className="business-button-secondary text-sm"
+            >
+              ← 戻る
+            </Link>
+            
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-blue-600 rounded text-white text-sm flex items-center justify-center font-semibold">
+                M
+              </div>
+              <span className="text-sm font-medium text-slate-600">お手本モード</span>
+            </div>
+          </div>
+          
+          <div className="text-center">
+            <h1 className="text-2xl font-semibold text-slate-900 mb-2">
+              {sampleScene.title}
+            </h1>
+            <p className="text-slate-600">プロフェッショナルな会話の見本</p>
+          </div>
+        </header>
 
-      {/* お手本の会話 */}
-      <Card className="p-3">
-        <SectionTitle>お手本の会話</SectionTitle>
-        <div className="px-1">
+        {/* お手本の会話 */}
+        <div className="business-card p-0">
+          <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
+            <h2 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+              <span className="w-6 h-6 bg-blue-600 rounded text-white text-sm flex items-center justify-center font-medium">1</span>
+              お手本の会話
+            </h2>
+          </div>
+          <div className="p-6">
           <ScenePlayerUI
             scene={modelScene}
             playing={playing}
@@ -348,31 +416,51 @@ export default function ModelPage() {
             progressSec={currentTime}
             durationSec={duration}
             currentIdx={currentIdx}
+            isGeneratingAudio={isGeneratingAudio}
+            isReadingSummary={isReadingSummary}
           />
+          </div>
         </div>
-      </Card>
 
-      {/* 今回のポイント */}
-      <Card className="p-3">
-        <SectionTitle>今回のポイント</SectionTitle>
-        <div className="px-1">
-          <ul className="list-disc pl-5 space-y-1">
-            {modelPoints.map((h, i) => <li key={i} className="text-sm">{h}</li>)}
-          </ul>
+        {/* 今回のポイント */}
+        <div className="business-card p-0" ref={learningPointsRef}>
+          <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
+            <h2 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+              <span className="w-6 h-6 bg-blue-600 rounded text-white text-sm flex items-center justify-center font-medium">2</span>
+              学習ポイント
+            </h2>
+          </div>
+          <div className="p-6">
+            <div className="space-y-4">
+              {modelPoints.map((h, i) => (
+                <div key={i} className="flex items-start gap-4 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                  <div className="flex-shrink-0 w-6 h-6 rounded bg-blue-600 text-white font-semibold text-sm flex items-center justify-center">
+                    {i + 1}
+                  </div>
+                  <p className="text-slate-700 leading-relaxed">{h}</p>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-      </Card>
 
-      {/* クイズ */}
-      <Card className="p-3">
-        <SectionTitle>クイズに挑戦</SectionTitle>
-        <div className="px-1" ref={quizRef}>
+        {/* クイズ */}
+        <div className="business-card p-0">
+          <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
+            <h2 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+              <span className="w-6 h-6 bg-blue-600 rounded text-white text-sm flex items-center justify-center font-medium">3</span>
+              理解度チェック
+            </h2>
+          </div>
+          <div className="p-6" ref={quizRef}>
           <QuizBlock
             quizzes={sampleScene.quizzes}
             storageKey={`kireina:score:${sampleScene.id}-model`}
             onFinish={(r) => console.log("saved", r)}
           />
+          </div>
         </div>
-      </Card>
+      </div>
     </main>
   );
 }

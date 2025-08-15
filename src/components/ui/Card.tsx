@@ -16,17 +16,17 @@ type CardProps<T extends keyof JSX.IntrinsicElements = "div"> = {
   "aria-labelledby"?: string;
 } & Omit<JSX.IntrinsicElements[T], "children" | "className">;
 
-export const Card = forwardRef<HTMLElement, CardProps<any>>(function Card(
+export const Card = forwardRef<HTMLElement, CardProps>(function Card(
   { children, className, as: Comp = "div", ...rest },
   ref
 ) {
   return (
     <Comp
-      ref={ref as any}
+      ref={ref as React.Ref<HTMLElement>}
       className={cn(
-        "rounded-2xl bg-white/90",
-        "shadow-[inset_0_1px_0_#fff,0_6px_24px_rgba(15,23,42,.06)]",
-        "ring-1 ring-slate-200 backdrop-blur-sm",
+        // Business card design
+        "bg-white border border-slate-200 rounded-lg shadow-sm",
+        "hover:shadow-md transition-all duration-200",
         className
       )}
       {...rest}
@@ -54,8 +54,8 @@ export function SectionTitle({
   className,
 }: SectionTitleProps) {
   return (
-    <div className={cn("flex items-center justify-between px-4 pt-4 pb-2", className)}>
-      <Heading id={id} className="text-[15px] font-semibold tracking-wide text-slate-800">
+    <div className={cn("flex items-center justify-between px-6 pt-6 pb-4 border-b border-slate-200 bg-slate-50", className)}>
+      <Heading id={id} className="text-xl font-semibold text-slate-900">
         {children}
       </Heading>
       {right}

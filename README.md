@@ -1,36 +1,123 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Kireina Web - 美しい日本語学習
 
-## Getting Started
+## プロジェクト概要
+- **名前**: Kireina Web
+- **目標**: ビジネス敬語とコミュニケーションスキルを学ぶ現代的なWebアプリケーション
+- **特徴**: 音声付き会話練習、自動スクロール機能、レスポンシブデザイン
 
-First, run the development server:
+## 本番URL
+- **メインページ（会話練習）**: https://3000-i62mlxdyjpkxkkzheguky-6532622b.e2b.dev/
+- **お手本の会話**: https://3000-i62mlxdyjpkxkkzheguky-6532622b.e2b.dev/model
 
+## 主な機能
+
+### 🎵 音声機能
+- OpenAI TTS API統合による自然な音声生成
+- 3段階の再生速度調整（0.9x, 1.0x, 1.1x）
+- シークバーによる位置調整
+- 音声と連動した会話ハイライト
+
+### 📱 レスポンシブUI
+- デスクトップ・スマートフォン対応
+- 固定ヘッダーによる常時アクセス可能なコントロール
+- 2段構成のモバイルレイアウト
+
+### 🎯 学習支援機能
+- 自動/手動スクロール切り替え
+- 学習ポイントへの自動スクロール（一度のみ実行）
+- 視覚的な話者識別（上司👑・部下👤アイコン）
+- インタラクティブなクイズ機能
+
+## 技術スタック
+
+### フロントエンド
+- **Next.js 15.4.6** - React フレームワーク
+- **TypeScript** - 型安全性
+- **TailwindCSS** - スタイリング
+- **Framer Motion** - アニメーション
+- **Lucide React** - アイコン
+
+### バックエンド
+- **Next.js API Routes** - サーバーサイド処理
+- **OpenAI TTS API** - 音声生成
+
+### 開発・デプロイ
+- **PM2** - プロセス管理
+- **ESLint** - コード品質
+- **Git** - バージョン管理
+
+## データアーキテクチャ
+
+### メインデータモデル
+- **Scene**: 会話シナリオ（ID、タイトル、スクリプト、クイズ）
+- **Quiz**: 学習問題（選択肢、正解、解説）
+- **Voice**: TTS音声タイプ（alloy, verse, sage）
+
+### ストレージ
+- **ローカルファイル**: シナリオデータとサンプル音声
+- **メモリキャッシュ**: TTS生成音声の一時保存
+
+## 開発ガイド
+
+### セットアップ
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# 依存関係のインストール
+npm install
+
+# 開発サーバー起動（PM2使用）
+pm2 start ecosystem.config.cjs
+
+# ビルド
+npm run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### プロジェクト構造
+```
+webapp/
+├── src/
+│   ├── app/              # Next.js App Router
+│   │   ├── api/tts/      # TTS API エンドポイント
+│   │   ├── model/        # お手本会話ページ
+│   │   └── scene/[id]/   # 個別シーンページ
+│   ├── components/       # React コンポーネント
+│   │   ├── ScenePlayerUI.tsx  # メイン音声プレイヤー
+│   │   ├── QuizBlock.tsx      # クイズコンポーネント
+│   │   └── ui/                # UI基底コンポーネント
+│   └── lib/              # ユーティリティ・データ
+│       ├── types.ts      # TypeScript型定義
+│       ├── scenes.ts     # シーンデータ管理
+│       └── *.ts          # 各種サンプルシーン
+├── public/               # 静的ファイル
+└── ecosystem.config.cjs  # PM2設定
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## ユーザーガイド
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 基本操作
+1. **再生**: ▶️ボタンで音声付き会話を開始
+2. **速度調整**: ×0.9, ×1.0, ×1.1 から選択
+3. **スクロール**: 自動/手動を切り替え可能
+4. **学習**: 音声終了後にクイズで理解度確認
 
-## Learn More
+### 推奨学習フロー
+1. **会話練習** → 実際の会話を聞いて問題点を把握
+2. **お手本学習** → 正しい表現を音声と共に学習
+3. **クイズ挑戦** → 理解度を確認
+4. **反復練習** → 苦手な部分を重点的に
 
-To learn more about Next.js, take a look at the following resources:
+## デプロイメント
+- **プラットフォーム**: サンドボックス環境（開発用）
+- **状態**: ✅ アクティブ
+- **最終更新**: 2025-08-15
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 今後の拡張予定
+- [ ] 新しい会話シナリオの追加
+- [ ] ユーザー進捗管理機能
+- [ ] お気に入り機能
+- [ ] カスタムシナリオ作成機能
+- [ ] データベース統合
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+**開発者**: AI Assistant  
+**プロジェクトマネージャー**: 芝田信晃さん  
+**最終更新日**: 2025年8月15日

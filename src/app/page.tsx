@@ -103,6 +103,7 @@ export default function Page() {
   // 実体の <audio>
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [audioURL, setAudioURL] = useState<string | null>(null);
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
 
   // 台本 → TTS セグメント（ナレーターはTTSしない）
   const ttsSegments = useMemo<Seg[]>(() => {
@@ -115,7 +116,7 @@ export default function Page() {
         if (!m) return null;
         const speakerRaw = m[1].trim();
         const text = m[2].trim();
-        if (NARRATOR_RE.test(speakerRaw)) return null; // ナレーターは読まない
+        // ナレーターも音声生成に含める（修正済み）
         return { speaker: speakerRaw, text, lineIndex };
       })
       .filter((x): x is Seg => !!x);
@@ -142,10 +143,12 @@ export default function Page() {
 
     (async () => {
       try {
+        setIsGeneratingAudio(true);
         if (!ttsSegments.length) {
           setAudioURL(null);
           setSegmentStartsSec([]);
           setMergedUiIndexes([]);
+          setIsGeneratingAudio(false);
           return;
         }
 
@@ -154,7 +157,7 @@ export default function Page() {
         setMergedUiIndexes(mergedSegs.map(s => s.lineIndex)); // ハイライト用
 
         // 2) AudioContext（24kHz優先、失敗時は既定SRでフォールバック）
-        const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+        const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
         const targetSR = 24000;
         let ctx: AudioContext;
         try {
@@ -163,13 +166,13 @@ export default function Page() {
           ctx = new AC();
         }
 
-        // 3) 並列でフェッチ＆デコード（個別失敗時は無音差し込みで継続）
-        const decoded = await asyncPool(3, mergedSegs, async (seg) => {
+        // 3) 並列でフェッチ＆デコード（並列数を5に増加で高速化）
+        const decoded = await asyncPool(5, mergedSegs, async (seg) => {
           const voice = voiceOf(seg.speaker || "");
           try {
             return await fetchDecodeSegment(ctx, seg.text, voice, "mp3");
-          } catch (e) {
-            console.warn("segment decode failed, inserting silence:", e);
+          } catch (error) {
+            console.warn("segment decode failed, inserting silence:", error);
             // 1秒の無音を挿入して全体進行を維持
             const silent = ctx.createBuffer(1, Math.max(1, Math.floor(targetSR * 1.0)), ctx.sampleRate);
             return silent;
@@ -213,11 +216,13 @@ export default function Page() {
         setDuration(rendered.duration);
         setCurrentTime(0);
         setCurrentIdx(firstDialogIndex); // 最初のダイアログ行をハイライト
+        setIsGeneratingAudio(false);
       } catch (e) {
         console.error("build merged audio failed:", e);
         setAudioURL(null);
         setSegmentStartsSec([]);
         setMergedUiIndexes([]);
+        setIsGeneratingAudio(false);
       }
     })();
 
@@ -298,22 +303,48 @@ export default function Page() {
 
   /* ========= JSX（本体の return） ========= */
   return (
-    <main className="mx-auto max-w-3xl p-6 space-y-6">
+    <main className="min-h-screen bg-slate-50">
+      <div className="mx-auto max-w-6xl px-6 py-8 space-y-8">
       {/* ✅ hidden audio は最上部に置く（常にマウントされた状態） */}
       <audio ref={audioRef} src={audioURL ?? undefined} preload="auto" hidden />
 
-      {/* 見出し */}
-      <header className="space-y-1">
-        <h1 className="text-xl font-bold">{scene.title}</h1>
-        <p className="text-sm opacity-70">
-          難易度: {scene.difficulty} / カテゴリ: {scene.category}
-        </p>
-      </header>
+        {/* 🏢 ビジネス向けヘッダー */}
+        <header className="bg-white border border-slate-200 rounded-lg shadow-sm p-8 animate-fade-in">
+          <div className="text-center">
+            <div className="inline-flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold text-xl">K</span>
+              </div>
+              <div className="text-left">
+                <h1 className="text-3xl font-semibold text-slate-900 tracking-tight">
+                  {scene.title}
+                </h1>
+                <p className="text-slate-600 text-sm font-medium">ビジネス日本語学習プラットフォーム</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-center gap-6 mt-6">
+              <div className="flex items-center gap-2 px-4 py-2 bg-slate-100 rounded-md">
+                <div className="w-2 h-2 rounded-full bg-blue-600" />
+                <span className="text-sm font-medium text-slate-700">難易度: {scene.difficulty}</span>
+              </div>
+              <div className="flex items-center gap-2 px-4 py-2 bg-slate-100 rounded-md">
+                <div className="w-2 h-2 rounded-full bg-slate-600" />
+                <span className="text-sm font-medium text-slate-700">カテゴリ: {scene.category}</span>
+              </div>
+            </div>
+          </div>
+        </header>
 
-      {/* 会話カード */}
-      <Card className="p-3">
-        <SectionTitle>会話</SectionTitle>
-        <div className="px-1">
+        {/* 会話セクション */}
+        <div className="business-card p-0">
+          <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
+            <h2 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+              <span className="w-6 h-6 bg-blue-600 rounded text-white text-sm flex items-center justify-center font-medium">1</span>
+              会話練習
+            </h2>
+          </div>
+          <div className="p-6">
           <ScenePlayerUI
             scene={scene}
             playing={playing}
@@ -326,29 +357,37 @@ export default function Page() {
             progressSec={currentTime}
             durationSec={duration}
             currentIdx={currentIdx}
+            isGeneratingAudio={isGeneratingAudio}
           />
+          </div>
         </div>
-      </Card>
 
-      {/* クイズカード（終了後ここへ自動スクロール） */}
-      <Card className="p-3">
-        <SectionTitle>クイズに挑戦</SectionTitle>
-        <div ref={quizRef} className="px-1">
+        {/* クイズセクション（終了後ここへ自動スクロール） */}
+        <div className="business-card p-0">
+          <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
+            <h2 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+              <span className="w-6 h-6 bg-blue-600 rounded text-white text-sm flex items-center justify-center font-medium">2</span>
+              理解度チェック
+            </h2>
+          </div>
+          <div ref={quizRef} className="p-6">
           <QuizBlock
             quizzes={scene.quizzes}
             storageKey={`kireina:score:${scene.id}`}
             onFinish={(r) => console.log("saved", r)}
           />
-          <div className="pt-3">
-            <Link
-              href="/model"
-              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700"
-            >
-              会話のお手本を聞く
-            </Link>
+            <div className="pt-6 border-t border-slate-200 mt-6">
+              <Link
+                href="/model"
+                className="business-button inline-flex items-center gap-2"
+              >
+                <span>📚</span>
+                <span>会話のお手本を確認する</span>
+              </Link>
+            </div>
           </div>
         </div>
-      </Card>
+      </div>
     </main>
   );
 }
