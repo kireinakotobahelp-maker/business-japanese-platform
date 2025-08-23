@@ -6,7 +6,7 @@ import { z } from "zod";
 export const runtime = "nodejs"; // EdgeではなくNodeで
 
 // ---- 設定（必要に応じてUI側と同期） ----
-const MODEL = "gpt-4o-mini-tts" as const;
+const MODEL = "tts-1" as const;
 const ALLOWED_VOICES = [
   "alloy", "verse", "aria", "sage", "nova", "ash", "coral",
 ] as const;
@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
         model: MODEL,
         voice,
         input: text,
-        format, // "mp3" | "wav" | "opus" | "pcm"
+        response_format: format, // "mp3" | "wav" | "opus" | "pcm"
       },
       { signal: controller.signal }
     );
@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: unknown) {
     // タイムアウト or Abort
-    if (err?.name === "AbortError") {
+    if ((err as any)?.name === "AbortError") {
       return new Response(
         JSON.stringify({ error: "Upstream timeout from TTS" }),
         { status: 504, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }

@@ -5,7 +5,7 @@ function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-type CardProps<T extends keyof JSX.IntrinsicElements = "div"> = {
+type CardProps<T extends keyof React.JSX.IntrinsicElements = "div"> = {
   /** 子要素 */
   children: ReactNode;
   /** 追記スタイル */
@@ -14,15 +14,15 @@ type CardProps<T extends keyof JSX.IntrinsicElements = "div"> = {
   as?: T;
   /** 画面内見出しに対応させるときに使う。SectionTitle の id と合わせると良い */
   "aria-labelledby"?: string;
-} & Omit<JSX.IntrinsicElements[T], "children" | "className">;
+} & Omit<React.JSX.IntrinsicElements[T], "children" | "className">;
 
-export const Card = forwardRef<HTMLElement, CardProps>(function Card(
+export const Card = forwardRef<HTMLDivElement, CardProps>(function Card(
   { children, className, as: Comp = "div", ...rest },
   ref
 ) {
   return (
     <Comp
-      ref={ref as React.Ref<HTMLElement>}
+      ref={ref as React.Ref<any>}
       className={cn(
         // Business card design
         "bg-white border border-slate-200 rounded-lg shadow-sm",

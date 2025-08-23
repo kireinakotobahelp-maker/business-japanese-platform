@@ -1,22 +1,13 @@
 'use client';
 
 /**
- * ScenePlayerUI - 会話再生用UIコンポーネント
- * 
- * Features:
- * - レスポンシブな音声コントロール（再生・一時停止・シーク・速度調整）
- * - 自動/手動スクロール切り替え
- * - 視覚的な話者アイコン（上司・部下）表示
- * - 現在再生中のセリフのハイライト
- * - スマートフォン対応レイアウト
+ * ScenePlayerUI - 会話再生用UIコンポーネント（新しいlines形式対応）
  */
 
-import { Play, Pause, Square, SkipBack, SkipForward, Crown, User } from "lucide-react";
+import { Play, Pause, Square, SkipBack, SkipForward, Crown, User, BookOpen, AlertCircle } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import React, { useMemo, useEffect, useRef } from "react";
 import { Scene } from "@/lib/types";
-
-type Line = { role: string; text: string; _srcIdx?: number };
 
 export function ScenePlayerUI(props: {
   scene: Scene;
@@ -32,57 +23,54 @@ export function ScenePlayerUI(props: {
   currentIdx: number; // 再生制御側の"元配列"index
   isGeneratingAudio?: boolean; // 音声生成中フラグ
   isReadingSummary?: boolean; // 学習ポイント読み上げ中フラグ
+  mode?: 'practice' | 'model'; // 会話練習 or お手本モード
+  hasFinished?: boolean; // 音声再生が完了したかどうか
 }) {
   const {
     scene, playing, rate, onRateChange,
     onPlay, onPause, onStop, onSeek,
-    progressSec, durationSec, currentIdx, isGeneratingAudio, isReadingSummary
+    progressSec, durationSec, currentIdx, isGeneratingAudio, isReadingSummary,
+    mode = 'practice', hasFinished = false
   } = props;
 
   const reduceMotion = useReducedMotion();
   
   // 自動スクロール用のref
-  const dialogRefs = useRef<{ [key: number]: HTMLLIElement | null }>({});
+  const dialogRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
   
   // 自動スクロールのON/OFF状態（デフォルトは手動=false）
   const [autoScrollEnabled, setAutoScrollEnabled] = React.useState(false);
+  
+  // 学習スポット表示状態（デフォルトで非表示）
+  const [showVocabularySpots, setShowVocabularySpots] = React.useState(false);
+  const [showImprovementPoints, setShowImprovementPoints] = React.useState(false);
 
-  // ---- parser（memo）----
+  // 新しいlines形式のシーンをパース（memo）
   const { dialog, narrations } = useMemo(() => {
-    const lines: Line[] = (scene?.script ?? "")
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const m = line.match(/^(.+?)\s*[:：]\s*(.+)$/);
-        if (m) {
-          const speaker = m[1].replace(/^[\d\s\.\)]+/, "").trim();
-          const role = speaker.toLowerCase();
-          const content = m[2];
-          if (/^(ナレーター|narrator|解説者)$/i.test(speaker)) {
-            return { role: "narrator", text: content };
-          }
-          return { role, text: content };
-        }
-        return { role: "narrator", text: line };
-      });
-
-    const segments = lines.map((s, i) => ({ ...s, _srcIdx: i }));
-    const narr = segments.filter(s => s.role === "narrator");
-    const dia = segments.filter(s => s.role !== "narrator");
+    if (!scene?.lines) return { dialog: [], narrations: [] };
+    
+    const narr = scene.lines.filter(line => /^(ナレーター|narrator|解説者)$/i.test(line.speaker));
+    const dia = scene.lines.filter(line => !/^(ナレーター|narrator|解説者)$/i.test(line.speaker));
+    
     return { dialog: dia, narrations: narr };
-  }, [scene?.script]);
+  }, [scene?.lines]);
 
-  // ---- role config（アイコン付き）----
-  const roleConfig = {
-    boss: { 
-      label: "部長", 
-      dot: "bg-slate-800", 
-      text: "text-slate-900", 
-      ring: "ring-slate-200",
-      icon: Crown,
-      iconColor: "text-white"
-    },
+  // 語彙スポット検索関数（お手本モードのみ）
+  const findVocabularySpot = React.useCallback((lineIndex: number) => {
+    if (mode !== 'model' || !scene?.vocabularySpots || !showVocabularySpots) return null;
+    
+    return scene.vocabularySpots.find(spot => spot.lineIndex === lineIndex);
+  }, [mode, scene?.vocabularySpots, showVocabularySpots]);
+
+  // 改善ポイント検索関数（会話練習モードのみ）
+  const findImprovementPoint = React.useCallback((lineIndex: number) => {
+    if (mode !== 'practice' || !scene?.improvementPoints || !showImprovementPoints) return null;
+    
+    return scene.improvementPoints.find(point => point.lineIndex === lineIndex);
+  }, [mode, scene?.improvementPoints, showImprovementPoints]);
+
+  // role config（アイコン付き）
+  const roleConfig: Record<string, any> = {
     "部長": { 
       label: "部長", 
       dot: "bg-slate-800", 
@@ -91,334 +79,343 @@ export function ScenePlayerUI(props: {
       icon: Crown,
       iconColor: "text-white"
     },
-    "部": { 
-      label: "部長", 
-      dot: "bg-slate-800", 
-      text: "text-slate-900", 
-      ring: "ring-slate-200",
+    "司会": { 
+      label: "司会", 
+      dot: "bg-blue-600", 
+      text: "text-blue-900", 
+      ring: "ring-blue-200",
       icon: Crown,
       iconColor: "text-white"
     },
-    shibata: { 
-      label: "芝田さん", 
-      dot: "bg-blue-500", 
-      text: "text-blue-600", 
+    "山田": { 
+      label: "司会", 
+      dot: "bg-blue-600", 
+      text: "text-blue-900", 
       ring: "ring-blue-200",
-      icon: User,
-      iconColor: "text-white"
-    },
-    "芝田": { 
-      label: "芝田さん", 
-      dot: "bg-blue-500", 
-      text: "text-blue-600", 
-      ring: "ring-blue-200",
-      icon: User,
+      icon: Crown,
       iconColor: "text-white"
     },
     "芝田さん": { 
-      label: "芝田さん", 
-      dot: "bg-blue-500", 
-      text: "text-blue-600", 
-      ring: "ring-blue-200",
+      label: "営業", 
+      dot: "bg-green-600", 
+      text: "text-green-900", 
+      ring: "ring-green-200",
       icon: User,
       iconColor: "text-white"
     },
-    "芝": { 
-      label: "芝田さん", 
-      dot: "bg-blue-500", 
-      text: "text-blue-600", 
-      ring: "ring-blue-200",
+    "田中": { 
+      label: "参加者", 
+      dot: "bg-purple-600", 
+      text: "text-purple-900", 
+      ring: "ring-purple-200",
       icon: User,
       iconColor: "text-white"
     },
-  } as const;
-
-  const fmt = (t: number) => {
-    if (!isFinite(t) || t < 0) t = 0;
-    const m = Math.floor(t / 60);
-    const s = Math.floor(t % 60);
-    return `${m}:${s.toString().padStart(2,"0")}`;
+    "佐藤": { 
+      label: "参加者", 
+      dot: "bg-indigo-600", 
+      text: "text-indigo-900", 
+      ring: "ring-indigo-200",
+      icon: User,
+      iconColor: "text-white"
+    },
+    "参加者一同": { 
+      label: "参加者", 
+      dot: "bg-gray-600", 
+      text: "text-gray-900", 
+      ring: "ring-gray-200",
+      icon: User,
+      iconColor: "text-white"
+    }
   };
 
-  const clampedProgress = Number.isFinite(progressSec)
-    ? Math.min(Math.max(0, progressSec), Math.max(0, durationSec))
-    : 0;
+  // デフォルト設定
+  const defaultConfig = { 
+    label: "話者", 
+    dot: "bg-slate-600", 
+    text: "text-slate-900",
+    ring: "ring-slate-200", 
+    icon: User,
+    iconColor: "text-white"
+  };
 
-  const rateOptions = [0.9, 1.0, 1.1];
-
-  // 自動スクロール機能（会話エリア内でのスクロール用に調整）
+  // 自動スクロール
   useEffect(() => {
-    // 自動スクロールが無効、または再生中でない場合はスキップ
-    if (!autoScrollEnabled || !playing) {
-      if (!autoScrollEnabled) {
-        console.log('🎵 Auto-scroll: Disabled by user, skipping scroll');
-      } else {
-        console.log('🎵 Auto-scroll: Not playing, skipping scroll');
-      }
-      return;
+    if (!autoScrollEnabled) return;
+    const ref = dialogRefs.current[currentIdx];
+    if (ref) {
+      ref.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-    
-    const currentElement = dialogRefs.current[currentIdx];
-    if (currentElement) {
-      console.log('🎯 Auto-scroll: Scrolling to dialog index', currentIdx);
-      
-      // 会話エリア内でスクロール（固定コントロールを考慮）
-      const elementRect = currentElement.getBoundingClientRect();
-      const viewportHeight = window.innerHeight;
-      const scrollY = window.scrollY;
-      
-      // 固定ヘッダーの高さを考慮して、要素が適切に見える位置にスクロール
-      const fixedHeaderHeight = 120; // 固定ヘッダーの概算高さ
-      const targetY = scrollY + elementRect.top - fixedHeaderHeight - 50;
-      
-      console.log('📍 Auto-scroll: Target Y position', targetY);
-      
-      window.scrollTo({
-        top: Math.max(0, targetY),
-        behavior: 'smooth'
-      });
-    } else {
-      console.log('❌ Auto-scroll: Element not found for index', currentIdx);
+  }, [currentIdx, autoScrollEnabled]);
+
+  // 進捗バー
+  const progressPercent = durationSec > 0 ? Math.min(100, (progressSec / durationSec) * 100) : 0;
+
+  const formatTime = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const seekToPercent = (percent: number) => {
+    if (durationSec > 0) {
+      onSeek((percent / 100) * durationSec);
     }
-  }, [currentIdx, playing, autoScrollEnabled]);
+  };
+
+  // 音声が終了していない間はスティッキー表示
+  const isSticky = !hasFinished;
 
   return (
-    <div className="mx-auto max-w-full">
-      {/* 🎵 固定ヘッダー: 常に表示される再生コントロール */}
-      <div className="sticky top-0 z-10 bg-white border border-slate-200 rounded-lg shadow-lg mb-6 p-4">
-        <div className="max-w-4xl mx-auto">
-          {/* 状態インジケーター */}
-          {isGeneratingAudio && (
-            <div className="mb-4 rounded-lg bg-blue-50 border border-blue-200 p-3">
-              <div className="flex items-center gap-3 text-sm font-medium text-blue-700">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
-                <span>音声を生成中です...</span>
+    <div className="max-w-4xl mx-auto space-y-6">
+      {/* コントロールパネル（スティッキー表示） */}
+      <div className={`${isSticky ? 'sticky top-2 md:top-4 z-10 shadow-lg' : ''} bg-white border border-slate-200 rounded-lg p-3 md:p-4 space-y-3 md:space-y-4`}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-slate-900">音声コントロール</h3>
+          <div className="flex items-center gap-2">
+            {isReadingSummary && (
+              <div className="flex items-center gap-2 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
+                <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
+                学習ポイント読み上げ中
               </div>
-            </div>
-          )}
-
-          {isReadingSummary && (
-            <div className="mb-4 rounded-lg bg-green-50 border border-green-200 p-3">
-              <div className="flex items-center gap-3 text-sm font-medium text-green-700">
-                <div className="h-4 w-4">
-                  <svg className="animate-pulse" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                  </svg>
-                </div>
-                <span>📚 学習ポイントを読み上げ中です...</span>
-              </div>
-            </div>
-          )}
-
-          {/* コンパクトなタイム & シークバー */}
-          <div className="flex items-center gap-3 mb-3">
-            <span className="w-10 text-xs font-mono font-medium text-slate-600">{fmt(clampedProgress)}</span>
-            <div className="relative flex-1">
-              <input
-                type="range"
-                min={0}
-                max={Math.max(1, durationSec || 0)}
-                step={0.01}
-                value={clampedProgress}
-                onChange={(e) => onSeek(parseFloat(e.target.value))}
-                aria-label="再生位置"
-                aria-valuetext={fmt(clampedProgress)}
-                disabled={!durationSec || !isFinite(durationSec)}
-                className="relative w-full h-2 bg-slate-200 rounded appearance-none cursor-pointer disabled:opacity-50
-                          [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 
-                          [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600
-                          [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white
-                          [&::-webkit-slider-thumb]:shadow-sm [&::-webkit-slider-thumb]:cursor-pointer
-                          [&::-webkit-slider-thumb]:transition-all [&::-webkit-slider-thumb]:duration-200
-                          [&::-webkit-slider-thumb]:hover:bg-blue-700"
-              />
-              <div 
-                className="absolute top-0 left-0 h-2 bg-blue-600 rounded pointer-events-none transition-all duration-200"
-                style={{ width: `${Math.max(0, Math.min(100, (clampedProgress / Math.max(1, durationSec || 0)) * 100))}%` }}
-              />
-            </div>
-            <span className="w-10 text-right text-xs font-mono font-medium text-slate-600">{fmt(durationSec)}</span>
-          </div>
-
-          {/* レスポンシブなコントロール */}
-          <div className="space-y-3 sm:space-y-0">
-            {/* メインコントロール（再生・シーク・停止） */}
-            <div className="flex items-center justify-center gap-2">
-              <button type="button"
-                className="business-button-secondary px-2 py-1 text-xs"
-                onClick={() => onSeek(Math.max(0, clampedProgress - 5))}
-                aria-label="5秒戻す">
-                <div className="flex items-center gap-1">
-                  <SkipBack className="h-3 w-3" />
-                  <span className="hidden sm:inline">5s</span>
-                </div>
+            )}
+            
+            {/* お手本モードでは語彙学習ボタンを表示 */}
+            {mode === 'model' && scene?.vocabularySpots && scene.vocabularySpots.length > 0 && (
+              <button
+                onClick={() => setShowVocabularySpots(!showVocabularySpots)}
+                className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm transition-colors ${
+                  showVocabularySpots 
+                    ? 'bg-green-100 text-green-800 border border-green-200' 
+                    : 'bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200'
+                }`}
+              >
+                <BookOpen size={14} />
+                語彙学習
+                {showVocabularySpots ? (
+                  <span className="text-xs">（非表示）</span>
+                ) : (
+                  <span className="text-xs">（表示）</span>
+                )}
               </button>
-
-              <button type="button"
-                className="business-button px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={playing ? onPause : onPlay}
-                disabled={isGeneratingAudio}
-                aria-label={isGeneratingAudio ? "音声生成中..." : (playing ? "一時停止" : "再生")}>
-                <div className="flex items-center justify-center">
-                  {isGeneratingAudio ? (
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                  ) : (
-                    playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />
-                  )}
-                </div>
+            )}
+            
+            {/* 会話練習モードでは改善ポイントボタンを表示 */}
+            {mode === 'practice' && scene?.improvementPoints && scene.improvementPoints.length > 0 && (
+              <button
+                onClick={() => setShowImprovementPoints(!showImprovementPoints)}
+                className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm transition-colors ${
+                  showImprovementPoints 
+                    ? 'bg-orange-100 text-orange-800 border border-orange-200' 
+                    : 'bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200'
+                }`}
+              >
+                <AlertCircle size={14} />
+                改善ポイント
+                {showImprovementPoints ? (
+                  <span className="text-xs">（非表示）</span>
+                ) : (
+                  <span className="text-xs">（表示）</span>
+                )}
               </button>
-
-              <button type="button"
-                className="business-button-secondary px-2 py-1 text-xs"
-                onClick={() => onSeek(Math.min(durationSec, clampedProgress + 5))}
-                aria-label="5秒進める">
-                <div className="flex items-center gap-1">
-                  <SkipForward className="h-3 w-3" />
-                  <span className="hidden sm:inline">5s</span>
-                </div>
-              </button>
-
-              <button type="button"
-                className="business-button-secondary px-3 py-1 text-xs"
-                onClick={onStop}>
-                <div className="inline-flex items-center gap-1">
-                  <Square className="h-3 w-3" /> 
-                  <span className="hidden sm:inline">停止</span>
-                </div>
-              </button>
-            </div>
-
-            {/* 速度 & スクロールコントロール（スマホでは2段目） */}
-            <div className="flex items-center justify-center gap-4 flex-wrap">
-              {/* 速度コントロール */}
-              <div className="flex items-center gap-1">
-                <span className="text-xs font-medium text-slate-600">速度:</span>
-                {rateOptions.map((r) => {
-                  const active = r === rate;
-                  return (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => onRateChange(r)}
-                      aria-pressed={active}
-                      className={[
-                        "px-2 py-1 text-xs font-medium rounded transition-colors duration-200",
-                        active 
-                          ? "bg-blue-600 text-white" 
-                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      ].join(" ")}
-                    >
-                      ×{r.toFixed(1)}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* 自動スクロール切り替えトグル */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-slate-600">スクロール:</span>
-                <button
-                  type="button"
-                  onClick={() => setAutoScrollEnabled(!autoScrollEnabled)}
-                  aria-pressed={autoScrollEnabled}
-                  className={[
-                    "relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
-                    autoScrollEnabled ? "bg-blue-600" : "bg-slate-300"
-                  ].join(" ")}
-                  title={autoScrollEnabled ? "自動スクロール ON" : "手動スクロール"}
-                >
-                  <span className="sr-only">自動スクロールの切り替え</span>
-                  <span
-                    className={[
-                      "inline-block h-3 w-3 transform rounded-full bg-white transition-transform duration-200",
-                      autoScrollEnabled ? "translate-x-5" : "translate-x-1"
-                    ].join(" ")}
-                  />
-                </button>
-                <span className="text-xs text-slate-600">
-                  {autoScrollEnabled ? "自動" : "手動"}
-                </span>
-              </div>
-            </div>
+            )}
           </div>
         </div>
+
+        {/* 再生コントロール */}
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onSeek(Math.max(0, progressSec - 10))}
+              className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+              disabled={isGeneratingAudio}
+            >
+              <SkipBack size={20} />
+            </button>
+            
+            <button
+              onClick={playing ? onPause : onPlay}
+              className="p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full transition-colors disabled:opacity-50"
+              disabled={isGeneratingAudio}
+            >
+              {playing ? <Pause size={20} /> : <Play size={20} />}
+            </button>
+            
+            <button
+              onClick={onStop}
+              className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+              disabled={isGeneratingAudio}
+            >
+              <Square size={20} />
+            </button>
+            
+            <button
+              onClick={() => onSeek(Math.min(durationSec, progressSec + 10))}
+              className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+              disabled={isGeneratingAudio}
+            >
+              <SkipForward size={20} />
+            </button>
+          </div>
+
+          {/* 速度調整 */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-600">速度:</span>
+            <select
+              value={rate}
+              onChange={(e) => onRateChange(Number(e.target.value))}
+              className="text-sm border border-slate-300 rounded px-2 py-1"
+              disabled={isGeneratingAudio}
+            >
+              <option value={0.5}>0.5x</option>
+              <option value={0.75}>0.75x</option>
+              <option value={1.0}>1.0x</option>
+              <option value={1.25}>1.25x</option>
+              <option value={1.5}>1.5x</option>
+            </select>
+          </div>
+
+          {/* 自動スクロール切り替え */}
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={autoScrollEnabled}
+              onChange={(e) => setAutoScrollEnabled(e.target.checked)}
+              className="rounded"
+            />
+            自動スクロール
+          </label>
+        </div>
+
+        {/* 進捗バー */}
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm text-slate-600">
+            <span>{formatTime(progressSec)}</span>
+            <span>{formatTime(durationSec)}</span>
+          </div>
+          <div 
+            className="w-full h-2 bg-slate-200 rounded-full overflow-hidden cursor-pointer"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const percent = ((e.clientX - rect.left) / rect.width) * 100;
+              seekToPercent(percent);
+            }}
+          >
+            <div 
+              className="h-full bg-blue-600 transition-all duration-200"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+        </div>
+
+        {isGeneratingAudio && (
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+            音声を生成中...
+          </div>
+        )}
       </div>
 
-      {/* 📚 コンパクトな解説カード */}
-      {!!narrations.length && (
-        <div className="mb-6 bg-slate-50 border border-slate-200 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-slate-600" />
-            <span className="text-sm font-semibold text-slate-700">解説</span>
-          </div>
-          {narrations.map((n, i) => (
-            <p key={i} className="mb-2 last:mb-0 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{n.text}</p>
-          ))}
-        </div>
-      )}
+      {/* ダイアログ表示 */}
+      <div className="bg-white border border-slate-200 rounded-lg p-6">
+        <h3 className="font-semibold text-slate-900 mb-4">会話</h3>
+        <div className="space-y-4">
+          {dialog.map((line, index) => {
+            const isActive = currentIdx === scene?.lines?.findIndex(l => l === line);
+            const config = roleConfig[line.speaker] || defaultConfig;
+            const IconComponent = config.icon;
+            
+            // 語彙スポットと改善ポイントを検索
+            const lineIndex = scene?.lines?.findIndex(l => l === line) ?? -1;
+            const vocabularySpot = findVocabularySpot(lineIndex);
+            const improvementPoint = findImprovementPoint(lineIndex);
 
-      {/* 🎭 コンパクトな会話表示 */}
-      <div className="space-y-3">
-        {dialog.map((seg) => {
-          const isActive = seg._srcIdx === currentIdx;
-          const conf = roleConfig[seg.role as keyof typeof roleConfig] ?? {
-            label: seg.role, 
-            dot: "bg-slate-400", 
-            text: "text-slate-600", 
-            ring: "ring-slate-200",
-            icon: User,
-            iconColor: "text-white"
-          };
-
-          return (
-            <div 
-              key={seg._srcIdx} 
-              className="group"
-              ref={(el) => {
-                if (seg._srcIdx !== undefined) {
-                  dialogRefs.current[seg._srcIdx] = el;
-                }
-              }}
-            >
-              <div className="flex items-start gap-3">
-                {/* コンパクトなアバター */}
-                <div className="flex-shrink-0 mt-0.5">
-                  <div className="relative">
-                    <div className={`w-8 h-8 rounded ${conf.dot} flex items-center justify-center`}>
-                      <conf.icon className={`h-4 w-4 ${conf.iconColor}`} />
+            return (
+              <div key={index} className="space-y-3">
+                <motion.div
+                  ref={(el) => { dialogRefs.current[lineIndex] = el; }}
+                  className={`flex gap-4 p-4 rounded-lg transition-all duration-300 ${
+                    isActive 
+                      ? 'bg-blue-50 border-l-4 border-l-blue-500 shadow-sm' 
+                      : 'hover:bg-slate-50'
+                  }`}
+                  animate={!reduceMotion && isActive ? { scale: [1, 1.02, 1] } : {}}
+                  transition={{ duration: 0.3 }}
+                >
+                  <div className={`w-10 h-10 ${config.dot} rounded-full flex items-center justify-center flex-shrink-0 ${
+                    isActive ? `ring-2 ${config.ring}` : ''
+                  }`}>
+                    <IconComponent size={16} className={config.iconColor} />
+                  </div>
+                  
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-medium text-sm text-slate-600">{config.label}</span>
+                      <span className="text-xs text-slate-500">({line.speaker})</span>
                     </div>
-                    {isActive && (
-                      <div className="absolute -inset-0.5 rounded bg-blue-600 opacity-50" />
-                    )}
+                    <p className={`leading-relaxed ${config.text} ${
+                      isActive ? 'font-medium' : ''
+                    }`}>
+                      {line.text}
+                    </p>
                   </div>
-                </div>
+                </motion.div>
 
-                <div className="flex-grow min-w-0">
-                  {/* コンパクトな名前ラベル */}
-                  <div className="mb-1">
-                    <span className={`inline-block text-xs font-semibold ${conf.text}`}>
-                      {conf.label}
-                    </span>
-                  </div>
-
-                  {/* コンパクトなメッセージ */}
+                {/* 語彙スポット表示（緑色） */}
+                {vocabularySpot && showVocabularySpots && (
                   <motion.div
-                    layout
-                    aria-current={isActive ? "true" : undefined}
-                    animate={reduceMotion ? undefined : { 
-                      backgroundColor: isActive ? "rgba(59, 130, 246, 0.05)" : "rgba(255,255,255,1)",
-                      borderColor: isActive ? "rgba(59, 130, 246, 0.3)" : "rgba(226, 232, 240, 1)"
-                    }}
-                    transition={reduceMotion ? undefined : { duration: 0.2 }}
-                    className="bg-white border border-slate-200 rounded px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap transition-all duration-200"
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="ml-14 bg-green-50 border border-green-200 rounded-lg p-4"
                   >
-                    {seg.text}
+                    <div className="flex items-center gap-2 mb-2">
+                      <BookOpen size={16} className="text-green-600" />
+                      <span className="font-semibold text-green-800">{vocabularySpot.word}</span>
+                      <span className="text-green-600 text-sm">（{vocabularySpot.reading}）</span>
+                    </div>
+                    <p className="text-green-700 text-sm mb-2">{vocabularySpot.meaning}</p>
+                    <p className="text-green-600 text-xs">{vocabularySpot.explanation}</p>
+                    {vocabularySpot.usage && (
+                      <p className="text-green-600 text-xs mt-1">💡 {vocabularySpot.usage}</p>
+                    )}
                   </motion.div>
-                </div>
+                )}
+
+                {/* 改善ポイント表示（オレンジ色） */}
+                {improvementPoint && showImprovementPoints && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="ml-14 bg-orange-50 border border-orange-200 rounded-lg p-4"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertCircle size={16} className="text-orange-600" />
+                      <span className="font-semibold text-orange-800">改善ポイント</span>
+                    </div>
+                    <div className="space-y-2">
+                      <div>
+                        <span className="text-orange-700 text-sm font-medium">問題: </span>
+                        <span className="text-orange-700 text-sm">{improvementPoint.issue}</span>
+                      </div>
+                      <p className="text-orange-600 text-xs">{improvementPoint.problemDescription}</p>
+                      <div>
+                        <span className="text-orange-700 text-sm font-medium">改善方法: </span>
+                        <span className="text-orange-700 text-sm">{improvementPoint.improvement}</span>
+                      </div>
+                      {improvementPoint.betterExpression && (
+                        <div className="bg-orange-100 p-2 rounded text-xs">
+                          <span className="text-orange-700 font-medium">より良い表現: </span>
+                          <span className="text-orange-800">「{improvementPoint.betterExpression}」</span>
+                        </div>
+                      )}
+                      <p className="text-orange-600 text-xs">{improvementPoint.explanation}</p>
+                    </div>
+                  </motion.div>
+                )}
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );

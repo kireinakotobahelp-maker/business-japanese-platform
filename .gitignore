@@ -1,51 +1,71 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Dependencies
+node_modules/
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# Next.js
+.next/
+out/
 
-# vercel
-.vercel
+# Production build
+build/
+dist/
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# dotenv environment variables file
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # PM2
 .pm2/
 pids/
 logs/
-*.log
 
-# Development files
-dev_server.*.log
-server.log
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Backup files
+*.backup
+*.bak
+*.tar.gz
+*.zip
+
+# TypeScript
+*.tsbuildinfo
+
+# Vercel
+.vercel
+
+# Testing
+coverage/
+
+# Temporary files
+tmp/
+temp/
+
+# Archives
+*.gz
+*.zip
+*.tar
