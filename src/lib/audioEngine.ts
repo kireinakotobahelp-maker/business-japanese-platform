@@ -5,41 +5,55 @@
  */
 
 import { Scene, ScriptLine, TTSSegment, TTSOptions, AudioResult, Voice } from './types';
+import { AppConfig, TTSProvider } from './config';
 
 // ナレーター表記ゆれ吸収
 const NARRATOR_RE = /(ナレーター|ナレータ|解説者|narrator)/i;
 
-// デフォルトの話者→ボイスマッピング
+// デフォルトの話者→ボイスマッピング（ElevenLabs対応）
 const DEFAULT_VOICE_MAPPING: Record<string, Voice> = {
-  '部長': 'alloy',
-  '上司': 'alloy', 
-  '司会': 'alloy',
-  '山田': 'alloy',
-  '芝田': 'nova',
-  '芝田さん': 'nova',
-  '営業': 'nova',
-  '田中': 'nova',
-  '佐藤': 'nova',
-  'ナレーター': 'sage',
-  '解説者': 'sage',
-  'narrator': 'sage'
+  '部長': 'male1',
+  '上司': 'male2', 
+  '司会': 'male1',
+  '山田': 'male2',
+  '芝田': 'female1',
+  '芝田さん': 'female1',
+  '営業': 'female2',
+  '田中': 'male3',
+  '佐藤': 'female3',
+  'ナレーター': 'narrator',
+  '解説者': 'narrator',
+  'narrator': 'narrator'
 };
 
-// 話者→ボイス決定ロジック
+// OpenAI音声との後方互換性
+const OPENAI_TO_ELEVENLABS: Record<string, Voice> = {
+  'alloy': 'male1',
+  'echo': 'male2',
+  'fable': 'male3',
+  'onyx': 'male1',
+  'nova': 'female1',
+  'shimmer': 'female2',
+  'sage': 'narrator'
+};
+
+// 話者→ボイス決定ロジック（ElevenLabs対応）
 function voiceOf(speaker: string, customMapping?: Record<string, Voice>): Voice {
   const mapping = { ...DEFAULT_VOICE_MAPPING, ...customMapping };
   
   // 完全一致を最初に試す
   if (mapping[speaker]) {
-    return mapping[speaker];
+    const voice = mapping[speaker];
+    // OpenAI音声の場合はElevenLabs音声に変換
+    return OPENAI_TO_ELEVENLABS[voice] || voice;
   }
   
   // パターンマッチング（後方互換性）
-  if (NARRATOR_RE.test(speaker)) return 'sage';
-  if (/^(部長|上司|司会|山田)/.test(speaker)) return 'alloy';
-  if (/^(芝田|芝田さん|営業|田中|佐藤)/.test(speaker)) return 'nova';
+  if (NARRATOR_RE.test(speaker)) return 'narrator';
+  if (/^(部長|上司|司会|山田)/.test(speaker)) return 'male1';
+  if (/^(芝田|芝田さん|営業|田中|佐藤)/.test(speaker)) return 'female1';
   
-  return 'sage'; // デフォルト
+  return 'narrator'; // デフォルト
 }
 
 // AudioBuffer → WAV Blob（16bit PCM, mono）
@@ -109,15 +123,19 @@ async function asyncPool<T, R>(
   });
 }
 
-// /api/tts → decode（mp3推奨）
+// TTS API → decode（ElevenLabs対応、OpenAI後方互換性）
 async function fetchDecodeSegment(
   ctx: AudioContext, 
   text: string, 
   voice: string, 
-  format: "mp3" | "wav" = "mp3"
+  format: "mp3" | "wav" = "mp3",
+  provider: "openai" | "elevenlabs" = "elevenlabs"
 ): Promise<AudioBuffer> {
   try {
-    const res = await fetch("/api/tts", {
+    // APIエンドポイントを選択
+    const apiEndpoint = provider === "elevenlabs" ? "/api/tts-elevenlabs" : "/api/tts";
+    
+    const res = await fetch(apiEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, voice, format }),
@@ -127,7 +145,7 @@ async function fetchDecodeSegment(
     // Safari 対策で ab を複製して渡す
     return await ctx.decodeAudioData(ab.slice(0));
   } catch (error) {
-    console.warn("segment decode failed, inserting silence:", error);
+    console.warn(`${provider} segment decode failed, inserting silence:`, error);
     // 1秒の無音を挿入して全体進行を維持
     const sr = Math.max(1, ctx.sampleRate || 24000);
     return ctx.createBuffer(1, Math.floor(sr * 1.0), sr);
@@ -168,10 +186,11 @@ export class AudioEngine {
       ctx = new AC();
     }
 
-    // 並列でフェッチ＆デコード
-    const decoded = await asyncPool(5, mergedSegs, async (seg) => {
+    // 並列でフェッチ＆デコード（設定に基づくプロバイダー使用）
+    const provider = options.ttsProvider || AppConfig.tts.defaultProvider;
+    const decoded = await asyncPool(AppConfig.audio.concurrency, mergedSegs, async (seg) => {
       const voice = voiceOf(seg.speaker || "", voiceMapping || scene.metadata?.voiceMapping);
-      return await fetchDecodeSegment(ctx, seg.text, voice, "mp3");
+      return await fetchDecodeSegment(ctx, seg.text, voice, "mp3", provider);
     });
 
     // 開始秒を計算

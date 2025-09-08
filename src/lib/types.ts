@@ -5,7 +5,14 @@ export type Category = "business" | "daily" | "formal";
 export type Difficulty = "beginner" | "intermediate" | "advanced";
 
 // TTS voices used across the app (keep in sync with voiceOf)
-export type Voice = "alloy" | "verse" | "sage";
+// ElevenLabsボイス + OpenAI互換性
+export type Voice = 
+  // ElevenLabsボイス
+  | "male1" | "male2" | "male3" 
+  | "female1" | "female2" | "female3" 
+  | "narrator"
+  // OpenAI互換性（自動変換される）
+  | "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer" | "sage";
 
 // ====== Quiz ======
 export type QuizChoice = { id: string; text: string };
@@ -102,6 +109,7 @@ export type TTSOptions = {
   mode: 'practice' | 'model';
   gapSeconds?: number;
   voiceMapping?: Record<string, Voice>;
+  ttsProvider?: 'openai' | 'elevenlabs';
 };
 
 export type AudioResult = {
